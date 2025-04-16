@@ -16,8 +16,6 @@ import (
 var (
 	ErrNew               = errors.New("failed to make new pool object")
 	ErrStoppingOrStopped = errors.New("pool is stopping or stopped")
-	errRingIsEmpty       = errors.New("ring is empty") // internal programming error
-	errRingIsFull        = errors.New("ring is full")  // internal programming error
 )
 
 // Config configures a new pool.

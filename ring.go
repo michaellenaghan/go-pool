@@ -1,6 +1,14 @@
 package pool
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	errRingIsEmpty = errors.New("ring is empty") // internal programming error
+	errRingIsFull  = errors.New("ring is full")  // internal programming error
+)
 
 // ring is a generic ring buffer that stores objects along with their last
 // used time.
