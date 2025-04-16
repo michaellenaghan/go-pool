@@ -26,13 +26,7 @@ func ExamplePool_concurrentGetAndPut() {
 		},
 	)
 	if err != nil {
-		fmt.Printf("Failed to new pool: %v\n", err)
-		return
-	}
-
-	err = pool.Start()
-	if err != nil {
-		fmt.Printf("Failed to start pool: %v\n", err)
+		fmt.Printf("Failed to create pool: %v\n", err)
 		return
 	}
 	defer pool.Stop()
@@ -116,11 +110,6 @@ func TestPoolSequentialGetAndPut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
 	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
-	}
 	defer p.Stop()
 
 	obj, err := p.Get(context.Background())
@@ -150,11 +139,6 @@ func TestPoolConcurrentGetAndPut(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
-	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
 	}
 	defer p.Stop()
 
@@ -280,11 +264,6 @@ func TestPoolCleanupIdleObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
 	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
-	}
 	defer p.Stop()
 
 	// Get 5 and then Put 5 objects
@@ -352,11 +331,6 @@ func TestPoolCleanupIdleObjectsAndThenGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
 	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
-	}
 	defer p.Stop()
 
 	// Get an object
@@ -420,11 +394,6 @@ func TestPoolCancelContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
 	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
-	}
 	defer p.Stop()
 
 	// Get the only available object
@@ -467,11 +436,6 @@ func TestPoolStressTest(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
-	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
 	}
 	defer p.Stop()
 
@@ -534,7 +498,7 @@ func TestPoolStressTest(t *testing.T) {
 // This test verifies error handling when NewFunc fails.
 // It tests two scenarios:
 //
-//  1. Failure during pool initialization (Start)
+//  1. Failure during pool initialization (New)
 //  2. Failure during normal operation when trying to create a new object
 //
 // The test ensures proper error propagation and pool state management in both
@@ -545,6 +509,36 @@ func TestPoolNewFuncError(t *testing.T) {
 	mu := sync.Mutex{} // Cleanup happens in a background goroutine
 	shouldFailNew := true
 
+	// New should fail because NewFunc returns an error
+	_, err := pool.New(
+		pool.Config[int]{
+			Min:         2,
+			Max:         5,
+			IdleTimeout: 500 * time.Millisecond,
+			NewFunc: func() (int, error) {
+				mu.Lock()
+				defer mu.Unlock()
+
+				if shouldFailNew {
+					return 0, fmt.Errorf("Failed to create object")
+				}
+
+				return 42, nil
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("Expected error, got: nil")
+	}
+	if !errors.Is(err, pool.ErrNew) {
+		t.Fatalf("Expected ErrNew error, got: %v", err)
+	}
+
+	mu.Lock()
+	shouldFailNew = false
+	mu.Unlock()
+
+	// Now make NewFunc succeed
 	p, err := pool.New(
 		pool.Config[int]{
 			Min:         2,
@@ -564,25 +558,6 @@ func TestPoolNewFuncError(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
-	}
-
-	// Start should fail because NewFunc returns an error
-	err = p.Start()
-	if err == nil {
-		t.Fatal("Expected error, got: nil")
-	}
-	if !errors.Is(err, pool.ErrNew) {
-		t.Fatalf("Expected ErrNew error, got: %v", err)
-	}
-
-	// Now make NewFunc succeed and start the pool
-	mu.Lock()
-	shouldFailNew = false
-	mu.Unlock()
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
 	}
 	defer p.Stop()
 
@@ -675,11 +650,6 @@ func TestPoolCheckFuncError(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
-	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
 	}
 	defer p.Stop()
 
@@ -776,11 +746,6 @@ func TestPoolStopWithBusyObjects(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
-	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
 	}
 
 	// Get some objects and keep track of them
@@ -917,11 +882,6 @@ func TestPoolEdgeCaseConfigurations(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create pool: %v", err)
 			}
-
-			err = p.Start()
-			if err != nil {
-				t.Fatalf("Failed to start pool: %v", err)
-			}
 			defer p.Stop()
 
 			// Verify initial pool state
@@ -1031,11 +991,6 @@ func TestPoolObjectReuse(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("Failed to create pool: %v", err)
-	}
-
-	err = p.Start()
-	if err != nil {
-		t.Fatalf("Failed to start pool: %v", err)
 	}
 	defer p.Stop()
 
