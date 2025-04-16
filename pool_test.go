@@ -19,7 +19,7 @@ func ExamplePool_concurrentGetAndPut() {
 		pool.Config[int]{
 			Min:         2,
 			Max:         10,
-			IdleTime:    500 * time.Millisecond,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc:     func() (int, error) { return 0, nil },
 			CheckFunc:   func(int) error { return nil }, // optional
 			DestroyFunc: func(int) {},                   // optional
@@ -107,7 +107,7 @@ func TestPoolSequentialGetAndPut(t *testing.T) {
 		pool.Config[int]{
 			Min:         2,
 			Max:         5,
-			IdleTime:    500 * time.Millisecond,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc:     func() (int, error) { return 0, nil },
 			CheckFunc:   func(int) error { return nil },
 			DestroyFunc: func(int) {},
@@ -142,7 +142,7 @@ func TestPoolConcurrentGetAndPut(t *testing.T) {
 		pool.Config[int]{
 			Min:         2,
 			Max:         10,
-			IdleTime:    500 * time.Millisecond,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc:     func() (int, error) { return 0, nil },
 			CheckFunc:   func(int) error { return nil },
 			DestroyFunc: func(int) {},
@@ -271,10 +271,10 @@ func TestPoolCleanupIdleObjects(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      min,
-			Max:      max,
-			IdleTime: 100 * time.Millisecond,
-			NewFunc:  func() (int, error) { return 0, nil },
+			Min:         min,
+			Max:         max,
+			IdleTimeout: 100 * time.Millisecond,
+			NewFunc:     func() (int, error) { return 0, nil },
 		},
 	)
 	if err != nil {
@@ -330,9 +330,9 @@ func TestPoolCleanupIdleObjectsAndThenGet(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      0,
-			Max:      3,
-			IdleTime: 100 * time.Millisecond,
+			Min:         0,
+			Max:         3,
+			IdleTimeout: 100 * time.Millisecond,
 			NewFunc: func() (int, error) {
 				mu.Lock()
 				defer mu.Unlock()
@@ -411,10 +411,10 @@ func TestPoolCancelContext(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      1,
-			Max:      1,
-			IdleTime: 500 * time.Millisecond,
-			NewFunc:  func() (int, error) { return 0, nil },
+			Min:         1,
+			Max:         1,
+			IdleTimeout: 500 * time.Millisecond,
+			NewFunc:     func() (int, error) { return 0, nil },
 		},
 	)
 	if err != nil {
@@ -459,10 +459,10 @@ func TestPoolStressTest(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      5,
-			Max:      20,
-			IdleTime: 500 * time.Millisecond,
-			NewFunc:  func() (int, error) { return 0, nil },
+			Min:         5,
+			Max:         20,
+			IdleTimeout: 500 * time.Millisecond,
+			NewFunc:     func() (int, error) { return 0, nil },
 		},
 	)
 	if err != nil {
@@ -547,9 +547,9 @@ func TestPoolNewFuncError(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      2,
-			Max:      5,
-			IdleTime: 500 * time.Millisecond,
+			Min:         2,
+			Max:         5,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc: func() (int, error) {
 				mu.Lock()
 				defer mu.Unlock()
@@ -647,9 +647,9 @@ func TestPoolCheckFuncError(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      1,
-			Max:      1,
-			IdleTime: 500 * time.Millisecond,
+			Min:         1,
+			Max:         1,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc: func() (int, error) {
 				mu.Lock()
 				defer mu.Unlock()
@@ -760,9 +760,9 @@ func TestPoolStopWithBusyObjects(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      2,
-			Max:      5,
-			IdleTime: 500 * time.Millisecond,
+			Min:         2,
+			Max:         5,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc: func() (int, error) {
 				return rand.Int(), nil
 			},
@@ -847,9 +847,9 @@ func TestPoolStopWithBusyObjects(t *testing.T) {
 
 // This test verifies the pool's behavior with different edge case configurations:
 //
-//  1. Fixed-size pool (min=max) with idle timeout (idleTime>0):
+//  1. Fixed-size pool (min=max) with idle timeout (idleTimeout>0):
 //     Should maintain exactly that many objects
-//  2. Fixed-size pool (min=max) no idle timeout (idleTime=0):
+//  2. Fixed-size pool (min=max) no idle timeout (idleTimeout=0):
 //     Objects should never be destroyed due to idling
 //  3. On-demand creation (min=0):
 //     Objects created only when needed
@@ -859,28 +859,28 @@ func TestPoolEdgeCaseConfigurations(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name     string
-		min      int
-		max      int
-		idleTime time.Duration
+		name        string
+		min         int
+		max         int
+		idleTimeout time.Duration
 	}{
 		{
-			name:     "FixedSizePoolWithIdleTimeout",
-			min:      5,
-			max:      5,
-			idleTime: 500 * time.Millisecond,
+			name:        "FixedSizePoolWithIdleTimeout",
+			min:         5,
+			max:         5,
+			idleTimeout: 500 * time.Millisecond,
 		},
 		{
-			name:     "FixedSizePoolWithNoIdleTimeout",
-			min:      3,
-			max:      3,
-			idleTime: 0,
+			name:        "FixedSizePoolWithNoIdleTimeout",
+			min:         3,
+			max:         3,
+			idleTimeout: 0,
 		},
 		{
-			name:     "OnDemandCreation",
-			min:      0,
-			max:      10,
-			idleTime: 500 * time.Millisecond,
+			name:        "OnDemandCreation",
+			min:         0,
+			max:         10,
+			idleTimeout: 500 * time.Millisecond,
 		},
 	}
 
@@ -894,9 +894,9 @@ func TestPoolEdgeCaseConfigurations(t *testing.T) {
 
 			p, err := pool.New(
 				pool.Config[int]{
-					Min:      tc.min,
-					Max:      tc.max,
-					IdleTime: tc.idleTime,
+					Min:         tc.min,
+					Max:         tc.max,
+					IdleTimeout: tc.idleTimeout,
 					NewFunc: func() (int, error) {
 						mu.Lock()
 						defer mu.Unlock()
@@ -940,7 +940,7 @@ func TestPoolEdgeCaseConfigurations(t *testing.T) {
 			// Test basic Get/Put operations
 			// For fixed size pools or no idle timeout, don't try to get more than min
 			extraObjs := 0
-			if tc.min < tc.max && tc.idleTime > 0 {
+			if tc.min < tc.max && tc.idleTimeout > 0 {
 				extraObjs = 2 // Only get extra objects if we can exceed min and have idle timeout
 			}
 
@@ -961,9 +961,9 @@ func TestPoolEdgeCaseConfigurations(t *testing.T) {
 			}
 
 			// Only for configurations with idle timeout and min < max, wait for cleanup
-			if tc.idleTime > 0 && tc.min < tc.max {
+			if tc.idleTimeout > 0 && tc.min < tc.max {
 				// Wait long enough for idle cleanup
-				time.Sleep(tc.idleTime * 2)
+				time.Sleep(tc.idleTimeout * 2)
 
 				stats = p.Stats()
 				if stats.CountNow != tc.min {
@@ -983,7 +983,7 @@ func TestPoolEdgeCaseConfigurations(t *testing.T) {
 			}
 
 			// For fixed size or no idle timeout, verify no objects were destroyed
-			if tc.min == tc.max || tc.idleTime == 0 {
+			if tc.min == tc.max || tc.idleTimeout == 0 {
 				mu.Lock()
 				destroyedCount := destroyed
 				mu.Unlock()
@@ -1015,9 +1015,9 @@ func TestPoolObjectReuse(t *testing.T) {
 
 	p, err := pool.New(
 		pool.Config[int]{
-			Min:      2,
-			Max:      5,
-			IdleTime: 500 * time.Millisecond,
+			Min:         2,
+			Max:         5,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc: func() (int, error) {
 				mu.Lock()
 				defer mu.Unlock()

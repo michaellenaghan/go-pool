@@ -5,11 +5,11 @@ import "time"
 // ring is a generic ring buffer that stores objects along with their last
 // used time.
 type ring[T any] struct {
-	buffer   []ringObject[T] // The actual ring buffer storage
-	head     int             // Index of the first object (0 <= head < cap(buffer))
-	tail     int             // Index of the next object (0 <= tail < cap(buffer))
-	count    int             // Current number of items in the buffer (0 <= count <= cap(buffer))
-	idleTime time.Duration   // Maximum time an object should be idle (>= 0; 0 == "never idle out")
+	buffer      []ringObject[T] // The actual ring buffer storage
+	head        int             // Index of the first object (0 <= head < cap(buffer))
+	tail        int             // Index of the next object (0 <= tail < cap(buffer))
+	count       int             // Current number of items in the buffer (0 <= count <= cap(buffer))
+	idleTimeout time.Duration   // Maximum time an object can be idle (>= 0; 0 == "never idle out")
 }
 
 // ringObject represents a generic object in the ring buffer along with its
@@ -20,17 +20,17 @@ type ringObject[T any] struct {
 }
 
 // newRing creates a new generic ring buffer with the given capacity.
-func newRing[T any](max int, idleTime time.Duration) ring[T] {
+func newRing[T any](max int, idleTimeout time.Duration) ring[T] {
 	return ring[T]{
-		buffer:   make([]ringObject[T], max),
-		idleTime: idleTime,
+		buffer:      make([]ringObject[T], max),
+		idleTimeout: idleTimeout,
 	}
 }
 
 // oldestIdleTooLong returns true if the oldest object has been idle too long.
 func (r *ring[T]) oldestIdleTooLong() bool {
 	if r.count > 0 {
-		return r.idleTime > 0 && time.Since(r.buffer[r.head].lastUsed) >= r.idleTime
+		return r.idleTimeout > 0 && time.Since(r.buffer[r.head].lastUsed) >= r.idleTimeout
 	} else {
 		panic(errRingIsEmpty)
 	}
@@ -84,7 +84,7 @@ func (r *ring[T]) pushNewest(object T) {
 		r.buffer[r.tail].object = object
 		// Don't record lastUsed time if we don't need it.
 		// (Recording time takes time.)
-		if r.idleTime > 0 {
+		if r.idleTimeout > 0 {
 			r.buffer[r.tail].lastUsed = time.Now()
 		}
 

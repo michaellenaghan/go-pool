@@ -6,8 +6,8 @@
 - Idle objects are stored in a ring buffer and ordered by their last-used times
 - Idle objects are reused on a LIFO (last in, first out) basis; in other words, the most recently used object is reused first
 - Idle objects are destroyed on a FIFO (first in, first out) basis; in other words, the least recently used object is destroyed first
-- A background goroutine checks the idle objects every `IdleTime`/2 seconds
-- The background goroutine destroys idle objects that exceed the configured `IdleTime`
+- A background goroutine checks the idle objects every `IdleTimeout`/2 seconds
+- The background goroutine destroys idle objects that exceed the configured `IdleTimeout`
 - When there are no idle objects and the pool is at capacity, `Get()` calls wait for an object to be returned by `Put()`
 - `Put()` calls hand off directly to waiting `Get()` calls; in other words, objects move directly from `Put()` to `Get()` without passing through the ring buffer
 - Waiting `Get()` calls are served on a FIFO (first in, first out) basis
@@ -37,7 +37,7 @@ func main() {
 		pool.Config[int]{
 			Min:         2,
 			Max:         10,
-			IdleTime:    500 * time.Millisecond,
+			IdleTimeout: 500 * time.Millisecond,
 			NewFunc:     func() (int, error) { return 0, nil },
 			CheckFunc:   func(int) error { return nil }, // this is optional, actually
 			DestroyFunc: func(int) {},                   // this is optional, actually

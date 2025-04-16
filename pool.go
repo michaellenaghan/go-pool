@@ -1,6 +1,6 @@
 // Package pool provides a concurrent generic object pool that efficiently
 // manages expensive-to-create objects. It handles object lifecycle from
-// creation to destruction, implements configurable (and optional) idle time
+// creation to destruction, implements configurable (and optional) idle timeout
 // management, and optimizes resource usage through carefully considered reuse
 // patterns.
 package pool
@@ -28,12 +28,12 @@ type Config[T any] struct {
 	// Max is the maximum number of objects in the pool.
 	// Must be >= min.
 	Max int
-	// IdleTime is the maximum time an object can be idle before being
-	// destroyed and recreated. If IdleTime is 0, objects never idle out
-	// (and min should equal max since objects between min and max would
-	// never idle out).
+	// IdleTimeout is the maximum time an object can be idle before being
+	// destroyed. If IdleTimeout is 0, objects never idle out (and min should
+	// equal max since objects between min and max would never idle out
+	// anyway).
 	// Must be >= 0.
-	IdleTime time.Duration
+	IdleTimeout time.Duration
 	// NewFunc is a function that creates a new object.
 	// This function is required.
 	NewFunc func() (T, error)
@@ -50,11 +50,11 @@ type Config[T any] struct {
 
 // Pool is a generic object pool that manages a collection of objects of type T.
 // It maintains a minimum and maximum number of objects, handles object creation
-// and destruction, and manages object availability and idle time.
+// and destruction, and manages object availability and idle timeouts.
 type Pool[T any] struct {
 	min         int               // must be >= 0
 	max         int               // must be >= min
-	idleTime    time.Duration     // must be >= 0; 0 == "never idle out"
+	idleTimeout time.Duration     // must be >= 0; 0 == "never idle out"
 	newFunc     func() (T, error) // required
 	checkFunc   func(T) error     // optional
 	destroyFunc func(T)           // optional
@@ -107,12 +107,12 @@ type Stats struct {
 // number of objects.
 //
 // Objects will be reused until they idle out — that is, until they've been
-// idle longer than idleTime. When they've been idle for longer than idleTime
-// they'll eventually be destroyed.
+// idle longer than idleTimeout. When they've been idle for longer than
+// idleTimeout they'll eventually be destroyed.
 //
-// An idleTime of zero means that objects never idle out.
+// An idleTimeout of zero means that objects never idle out.
 //
-// (When idleTime is zero, min should equal max since objects between min and
+// (When idleTimeout is zero, min should equal max since objects between min and
 // max would never idle out anyway.)
 //
 // The newFunc function is required and used to create new objects.
@@ -130,15 +130,15 @@ func New[T any](config Config[T]) (*Pool[T], error) {
 	if config.Min > config.Max {
 		return nil, errors.New("min must be less than or equal to max")
 	}
-	if config.IdleTime < 0 {
-		return nil, errors.New("idle time must be greater than or equal to zero")
+	if config.IdleTimeout < 0 {
+		return nil, errors.New("idle timeout must be greater than or equal to zero")
 	}
 	// This isn't *really* an error, it's just an indication that someone's
 	// mental model may not be quite right. Once more than min objects exist,
 	// they'll continue to exist until `Stop()` is called. Again, not *really*
 	// an error, but probably not what was intended?
-	if config.IdleTime == 0 && config.Min != config.Max {
-		return nil, errors.New("when idle time equals zero min should equal max")
+	if config.IdleTimeout == 0 && config.Min != config.Max {
+		return nil, errors.New("when idle timeout equals zero min should equal max")
 	}
 	if config.NewFunc == nil {
 		return nil, errors.New("newFunc is required")
@@ -146,11 +146,11 @@ func New[T any](config Config[T]) (*Pool[T], error) {
 	p := &Pool[T]{
 		min:         config.Min,
 		max:         config.Max,
-		idleTime:    config.IdleTime,
+		idleTimeout: config.IdleTimeout,
 		newFunc:     config.NewFunc,
 		checkFunc:   config.CheckFunc,
 		destroyFunc: config.DestroyFunc,
-		idle:        newRing[T](config.Max, config.IdleTime),
+		idle:        newRing[T](config.Max, config.IdleTimeout),
 		waiting:     make(chan waitingResult[T]),
 		stoppingCh:  make(chan struct{}),
 		stoppingWg:  sync.WaitGroup{},
@@ -443,8 +443,8 @@ func (p *Pool[T]) muObjectWasDestroyed() {
 // cleanupTick is an internal method that periodically checks for and removes
 // idle objects from the pool.
 func (p *Pool[T]) cleanupTick() {
-	if p.max > p.min && p.idleTime > 0 {
-		ticker := time.NewTicker(p.idleTime / 2)
+	if p.max > p.min && p.idleTimeout > 0 {
+		ticker := time.NewTicker(p.idleTimeout / 2)
 		defer ticker.Stop()
 
 		for {
