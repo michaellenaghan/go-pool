@@ -1,7 +1,8 @@
-// Package pool provides a concurrent generic object pool that efficiently
-// manages expensive-to-create objects. It handles object lifecycles from
-// creation to destruction and offers configurable (and optional) idle timeout
-// management.
+// Package `pool` provides a concurrent, generic, variable-capacity object
+// pool. It maintains a variable number of objects throughout the pool's
+// lifetime, adjusting based on demand and idle timeouts. For a more static
+// fixed-capacity alternative, consider
+// https://github.com/michaellenaghan/go-simplepool.
 package pool
 
 import (
