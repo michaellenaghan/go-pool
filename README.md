@@ -12,9 +12,9 @@ Package `pool` provides a concurrent, generic, variable-capacity object pool. It
 - `Put()` calls hand off objects directly to waiting `Get()` calls, if there are any; in other words, objects move directly from `Put()` to `Get()` without passing through the ring buffer
 - Waiting `Get()` calls are served on a FIFO (first in, first out) basis
 
-Code is available at [github.com/michaellenaghan/go-pool](https://github.com/michaellenaghan/go-pool).
+The code is available at [github.com/michaellenaghan/go-pool](https://github.com/michaellenaghan/go-pool).
 
-Documentation is available at [pkg.go.dev/github.com/michaellenaghan/go-pool](https://pkg.go.dev/github.com/michaellenaghan/go-pool).
+The documentation is available at [pkg.go.dev/github.com/michaellenaghan/go-pool](https://pkg.go.dev/github.com/michaellenaghan/go-pool).
 
 ## Installation
 
