@@ -233,8 +233,7 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 // Otherwise, if any Get calls are waiting for an object, Put directly hands
 // the object off to the longest-waiting Get call.
 //
-// If no Get calls are waiting, the object is added to the end of the idle
-// pool.
+// Otherwise, the object is added to the idle pool.
 func (p *Pool[T]) Put(object T) {
 	if p.checkFunc != nil {
 		err := p.checkFunc(object)
