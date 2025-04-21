@@ -1,7 +1,8 @@
-// Package pool provides a concurrent generic object pool that efficiently
-// manages expensive-to-create objects. It handles object lifecycles from
-// creation to destruction and offers configurable (and optional) idle timeout
-// management.
+// Package `pool` provides a concurrent, generic, variable-capacity object
+// pool. It maintains a variable number of objects throughout the pool's
+// lifetime, adjusting based on demand and idle timeouts. For a more static
+// fixed-capacity alternative, consider
+// https://github.com/michaellenaghan/go-simplepool.
 package pool
 
 import (
@@ -232,8 +233,7 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 // Otherwise, if any Get calls are waiting for an object, Put directly hands
 // the object off to the longest-waiting Get call.
 //
-// If no Get calls are waiting, the object is added to the end of the idle
-// pool.
+// Otherwise, the object is added to the idle pool.
 func (p *Pool[T]) Put(object T) {
 	if p.checkFunc != nil {
 		err := p.checkFunc(object)
