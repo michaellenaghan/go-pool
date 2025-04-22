@@ -210,15 +210,11 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 			var zero T
 			return zero, ctx.Err()
 		default:
-			cancel := context.AfterFunc(ctx, func() {
-				// Broadcast the condition to ensure that the `Wait()` below is
-				// signaled. `Broadcast()` will result in spurious wakeups, but
-				// it's our only choice; `Signal()` will only signal *one*
-				// waiter, and it may not be *our* waiter.
-				p.mu.Lock()
-				p.cond.Broadcast()
-				p.mu.Unlock()
-			})
+			// Broadcast the condition to ensure that the `Wait()` below is
+			// signaled. `Broadcast()` will result in spurious wakeups, but
+			// it's our only choice; `Signal()` will only signal *one*
+			// waiter, and it may not be *our* waiter.
+			cancel := context.AfterFunc(ctx, p.cond.Broadcast)
 
 			p.muObjectWaitingStart()
 			p.cond.Wait()
