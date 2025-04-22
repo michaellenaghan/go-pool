@@ -210,36 +210,30 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 			var zero T
 			return zero, ctx.Err()
 		default:
-			done := make(chan struct{})
-
-			go func() {
-				select {
-				case <-ctx.Done():
-					// Broadcast the condition to ensure that the `Wait()`
-					// below is signaled. `Broadcast()` will almost certainly
-					// result in spurious wakeups, but it's our only choice;
-					// `Signal()` will only signal *one* waiter, and it may not
-					// be *our* waiter.
-					p.mu.Lock()
-					p.cond.Broadcast()
-					p.mu.Unlock()
-				case <-done:
-				}
-			}()
+			cancel := context.AfterFunc(ctx, func() {
+				// Broadcast the condition to ensure that the `Wait()` below is
+				// signaled. `Broadcast()` will result in spurious wakeups, but
+				// it's our only choice; `Signal()` will only signal *one*
+				// waiter, and it may not be *our* waiter.
+				p.mu.Lock()
+				p.cond.Broadcast()
+				p.mu.Unlock()
+			})
 
 			p.muObjectWaitingStart()
 			p.cond.Wait()
 			p.muObjectWaitingFinish()
 
-			close(done)
-
-			select {
-			case <-ctx.Done():
+			// true = the call to the AfterFunc() was cancelled
+			// false = the call to the AfterFunc() was *not* cancelled; either:
+			//         1. f was already called; or
+			//         2. cancel() was already called
+			// (2) isn't applicable in our case, so it must be (1).
+			if !cancel() {
 				p.mu.Unlock()
 
 				var zero T
 				return zero, ctx.Err()
-			default:
 			}
 		}
 	}
