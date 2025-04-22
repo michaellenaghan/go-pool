@@ -138,7 +138,9 @@ func (p *Pool[T]) Stop() {
 //
 // (If the error is not nil the object will be the zero value of the type T.)
 //
-// If the pool is stopping or stopped, Get returns an error.
+// If the provided context was cancelled, Get returns an error.
+//
+// Otherwise, if the pool is stopping or stopped, Get returns an error.
 //
 // Otherwise, if there are idle objects, Get returns the most recently used
 // idle object (LIFO).
@@ -150,6 +152,13 @@ func (p *Pool[T]) Stop() {
 // Get stops waiting when the provided context is cancelled or when Stop is
 // called.
 func (p *Pool[T]) Get(ctx context.Context) (T, error) {
+	select {
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	default:
+	}
+
 	p.mu.Lock()
 
 	for {
@@ -223,6 +232,15 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 			p.muObjectWaitingFinish()
 
 			close(done)
+
+			select {
+			case <-ctx.Done():
+				p.mu.Unlock()
+
+				var zero T
+				return zero, ctx.Err()
+			default:
+			}
 		}
 	}
 }
