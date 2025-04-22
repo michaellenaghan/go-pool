@@ -27,25 +27,22 @@ type Pool[T any] struct {
 	checkFunc   func(T) error     // optional
 	destroyFunc func(T)           // optional
 
-	mu sync.Mutex
+	mu   sync.Mutex
+	cond *sync.Cond // signal waiting "Get"ers
 
 	count int // min <= count <= max
 
-	idle    ring[T]               // idle object ring buffer, ordered by lastUsed
-	waiting chan waitingResult[T] // "Get"ers waiting for "Put"ers
+	idle ring[T] // idle object ring buffer, ordered by lastUsed
 
 	stoppingOrStopped bool
 	stoppingCh        chan struct{}
 	stoppingWg        sync.WaitGroup
 
 	createdTotal   uint // created an object (stats only)
-	waitedTotal    uint // waited for an object (stats only)
 	destroyedTotal uint // destroyed an object (stats only)
-}
 
-type waitingResult[T any] struct {
-	object T
-	retry  bool
+	waitingMax int // waiting for an object max (stats only)
+	waitingNow int // waiting for an object now (stats only)
 }
 
 // New creates a new object pool.
@@ -76,10 +73,10 @@ func New[T any](config Config[T]) (*Pool[T], error) {
 		checkFunc:   config.CheckFunc,
 		destroyFunc: config.DestroyFunc,
 		idle:        newRing[T](config.Max, config.IdleTimeout),
-		waiting:     make(chan waitingResult[T]),
 		stoppingCh:  make(chan struct{}),
 		stoppingWg:  sync.WaitGroup{},
 	}
+	p.cond = sync.NewCond(&p.mu)
 
 	for range p.min {
 		object, err := p.newFunc()
@@ -120,6 +117,8 @@ func (p *Pool[T]) Stop() {
 
 	p.stoppingOrStopped = true
 	close(p.stoppingCh)
+	p.cond.Broadcast()
+
 	p.stoppingWg.Add(p.count)
 
 	for p.idle.count > 0 {
@@ -148,14 +147,12 @@ func (p *Pool[T]) Stop() {
 //
 // Otherwise, Get waits for an object to be returned to the pool by Put.
 //
-// (Waiting Get calls are served in FIFO order.)
-//
 // Get stops waiting when the provided context is cancelled or when Stop is
 // called.
 func (p *Pool[T]) Get(ctx context.Context) (T, error) {
-	for {
-		p.mu.Lock()
+	p.mu.Lock()
 
+	for {
 		// 1. pool is stopping or stopped
 		if p.stoppingOrStopped {
 			p.mu.Unlock()
@@ -179,10 +176,10 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 
 		// 3. pool has capacity
 		if p.count < p.max {
-			// Don't hold the lock while we call newFunc().
 			p.muObjectWasCreated()
 			p.mu.Unlock()
 
+			// Don't hold the lock while we call newFunc().
 			object, err := p.newFunc()
 			if err != nil {
 				p.mu.Lock()
@@ -197,26 +194,35 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 		}
 
 		// 4. pool has no idle objects and no capacity; wait for an object
-		p.muObjectWasWaitedFor()
-		p.mu.Unlock()
-
 		select {
 		case <-ctx.Done():
+			p.mu.Unlock()
+
 			var zero T
 			return zero, ctx.Err()
-		case waitingResult := <-p.waiting:
-			// An object was destroyed after failing a CheckFunc() call. There
-			// might be capacity to create a new object now. More importantly,
-			// though, we don't want to be stuck waiting for an object that
-			// might never arrive.
-			if waitingResult.retry {
-				continue
-			}
+		default:
+			done := make(chan struct{})
 
-			return waitingResult.object, nil
-		case <-p.stoppingCh:
-			var zero T
-			return zero, ErrStoppingOrStopped
+			go func() {
+				select {
+				case <-ctx.Done():
+					// Broadcast the condition to ensure that the `Wait()`
+					// below is signaled. `Broadcast()` will almost certainly
+					// result in spurious wakeups, but it's our only choice;
+					// `Signal()` will only signal *one* waiter, and it may not
+					// be *our* waiter.
+					p.mu.Lock()
+					p.cond.Broadcast()
+					p.mu.Unlock()
+				case <-done:
+				}
+			}()
+
+			p.muObjectWaitingStart()
+			p.cond.Wait()
+			p.muObjectWaitingFinish()
+
+			close(done)
 		}
 	}
 }
@@ -230,71 +236,21 @@ func (p *Pool[T]) Get(ctx context.Context) (T, error) {
 // Otherwise, if the pool is stopping or stopped, Put destroys the object
 // rather than returning it to the pool.
 //
-// Otherwise, if any Get calls are waiting for an object, Put directly hands
-// the object off to the longest-waiting Get call.
-//
 // Otherwise, the object is added to the idle pool.
 func (p *Pool[T]) Put(object T) {
-	if p.checkFunc != nil {
-		err := p.checkFunc(object)
-		if err != nil {
-			// Don't hold the lock while we call destroyFunc().
-			p.mu.Lock()
-			p.muObjectWasDestroyed()
-			p.mu.Unlock()
-
-			// We're destroying an object rather than returning it to the
-			// pool.
-			//
-			// Imagine a case where the pool size is 1 and there's at least
-			// one waiting Get() call. If we don't send a retry signal to
-			// the waiting Get() call, it could end up waiting forever. (The
-			// "could" is because the next Get() call to come along will see
-			// there's capacity, create a new object, and eventually return
-			// it to the pool — waking the waiting Get().)
-			//
-			// In theory, we could optimize this; we only have a problem when
-			// waiting Get() calls are >= busy objects. (If busy > waiting
-			// then eventually all of the waiting Get() calls will be woken
-			// up when the busy objects return.) The problem is that we compute
-			// waiting with len(p.waiting) -- and, at least in theory, that
-			// number could change after we check it. I mean, not today it
-			// couldn't; we only send to the channel when the mutex is locked.
-			// But, hey, maybe someday something changes, and that becomes
-			// possible. (Indeed, after writing that I ended up moving *this*
-			// send outside of the mutex lock, for, well, reasons!)
-			//
-			// The downside of not being more conservative is that the Get()
-			// call at the front of the waiting queue could end up at the back.
-			// On the other hand, it's also possible that the waiting Get()
-			// that we just woke up will see that there's now capacity
-			// available and create a new object. So, yes, we might end up
-			// worse off — and, no, we might not.
-			//
-			// P.S. We send to the waiting channel before actually destroying
-			// the object because there's no point in making the waiting
-			// Get() call wait any longer than it has to.
-
-			select {
-			case p.waiting <- waitingResult[T]{retry: true}:
-			default:
-			}
-
-			if p.destroyFunc != nil {
-				p.destroyFunc(object)
-			}
-
-			return
-		}
-	}
+	// Don't hold the lock while we call checkFunc().
+	checkFuncErr := p.checkFunc != nil && p.checkFunc(object) != nil
 
 	p.mu.Lock()
 
-	if p.stoppingOrStopped {
-		// Don't hold the lock while we call destroyFunc().
+	// 1. destroy the object if checkFunc() returned an error
+	if checkFuncErr {
 		p.muObjectWasDestroyed()
 		p.mu.Unlock()
 
+		p.cond.Signal()
+
+		// Don't hold the lock while we call destroyFunc().
 		if p.destroyFunc != nil {
 			p.destroyFunc(object)
 		}
@@ -302,13 +258,26 @@ func (p *Pool[T]) Put(object T) {
 		return
 	}
 
-	select {
-	case p.waiting <- waitingResult[T]{object: object}:
-	default:
-		p.idle.pushNewest(object)
+	// 2. destroy the object if the pool is stopping or stopped
+	if p.stoppingOrStopped {
+		p.muObjectWasDestroyed()
+		p.mu.Unlock()
+
+		p.cond.Signal()
+
+		// Don't hold the lock while we call destroyFunc().
+		if p.destroyFunc != nil {
+			p.destroyFunc(object)
+		}
+
+		return
 	}
 
+	// 3. return the object to the pool.
+	p.idle.pushNewest(object)
 	p.mu.Unlock()
+
+	p.cond.Signal()
 }
 
 // muObjectWasCreated is an internal method that manipulates some counters.
@@ -316,12 +285,6 @@ func (p *Pool[T]) Put(object T) {
 func (p *Pool[T]) muObjectWasCreated() {
 	p.createdTotal++
 	p.count++
-}
-
-// muObjectWasWaitedFor is an internal method that manipulates some counters.
-// This method should be called while holding the pool's mutex.
-func (p *Pool[T]) muObjectWasWaitedFor() {
-	p.waitedTotal++
 }
 
 // muObjectWasDestroyed is an internal method that manipulates some counters.
@@ -332,6 +295,19 @@ func (p *Pool[T]) muObjectWasDestroyed() {
 	if p.stoppingOrStopped {
 		p.stoppingWg.Done()
 	}
+}
+
+// muObjectWaitingStart is an internal method that manipulates some counters.
+// This method should be called while holding the pool's mutex.
+func (p *Pool[T]) muObjectWaitingStart() {
+	p.waitingNow++
+	p.waitingMax = max(p.waitingNow, p.waitingMax)
+}
+
+// muObjectWaitingFinish is an internal method that manipulates some counters.
+// This method should be called while holding the pool's mutex.
+func (p *Pool[T]) muObjectWaitingFinish() {
+	p.waitingNow--
 }
 
 // cleanupTick is an internal method that periodically checks for and removes
@@ -357,15 +333,14 @@ func (p *Pool[T]) cleanupTick() {
 func (p *Pool[T]) cleanupTock() {
 	p.mu.Lock()
 	for !p.stoppingOrStopped && p.count > p.min && p.idle.count > 0 && p.idle.oldestIdleTooLong() {
-		// Don't hold the lock while we call destroyFunc().
 		object := p.idle.popOldest()
 		p.muObjectWasDestroyed()
-		p.mu.Unlock()
 
+		// Don't hold the lock while we call destroyFunc().
+		p.mu.Unlock()
 		if p.destroyFunc != nil {
 			p.destroyFunc(object)
 		}
-
 		p.mu.Lock()
 	}
 	p.mu.Unlock()
@@ -378,12 +353,13 @@ func (p *Pool[T]) Stats() Stats {
 
 	return Stats{
 		CreatedTotal:   p.createdTotal,
-		WaitedTotal:    p.waitedTotal,
 		DestroyedTotal: p.destroyedTotal,
 
-		CountNow:   p.count,
-		BusyNow:    p.count - p.idle.count,
-		IdleNow:    p.idle.count,
-		WaitingNow: len(p.waiting),
+		CountNow: p.count,
+		BusyNow:  p.count - p.idle.count,
+		IdleNow:  p.idle.count,
+
+		WaitingNow: p.waitingNow,
+		WaitingMax: p.waitingMax,
 	}
 }

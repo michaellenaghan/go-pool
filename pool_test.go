@@ -14,6 +14,78 @@ import (
 	"github.com/michaellenaghan/go-pool"
 )
 
+func BenchmarkGetPut(b *testing.B) {
+	scenarios := []struct {
+		min         int
+		max         int
+		idleTimeout time.Duration
+	}{
+		// w/o IdleTimeout (so w/o lastUsed)
+		{6, 6, 0},
+		{12, 12, 0},
+		{24, 24, 0},
+		// w/ IdleTimeout (so w/ lastUsed)
+		{6, 6, 5 * time.Second},
+		{12, 12, 5 * time.Second},
+		{24, 24, 5 * time.Second},
+	}
+
+	for _, scenario := range scenarios {
+		scenarioName := fmt.Sprintf("Min=%d/Max=%d/IdleTimeout=%s",
+			scenario.min, scenario.max, scenario.idleTimeout)
+
+		b.Run("Sequential/"+scenarioName, func(b *testing.B) {
+			pool, err := pool.New(
+				pool.Config[int]{
+					Min:         scenario.min,
+					Max:         scenario.max,
+					IdleTimeout: scenario.idleTimeout,
+					NewFunc:     func() (int, error) { return 0, nil },
+				},
+			)
+			if err != nil {
+				b.Fatalf("Failed to create pool: %v\n", err)
+			}
+			defer pool.Stop()
+
+			for b.Loop() {
+				obj, err := pool.Get(b.Context())
+				if err != nil {
+					b.Errorf("Failed to get object: %v\n", err)
+					continue
+				}
+				pool.Put(obj)
+			}
+		})
+
+		b.Run("Parallel/"+scenarioName, func(b *testing.B) {
+			pool, err := pool.New(
+				pool.Config[int]{
+					Min:         scenario.min,
+					Max:         scenario.max,
+					IdleTimeout: scenario.idleTimeout,
+					NewFunc:     func() (int, error) { return 0, nil },
+				},
+			)
+			if err != nil {
+				b.Fatalf("Failed to create pool: %v\n", err)
+			}
+			defer pool.Stop()
+
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					obj, err := pool.Get(b.Context())
+					if err != nil {
+						b.Errorf("Failed to get object: %v\n", err)
+						continue
+					}
+					pool.Put(obj)
+				}
+			})
+		})
+	}
+}
+
 func ExamplePool_concurrentGetAndPut() {
 	pool, err := pool.New(
 		pool.Config[int]{
@@ -52,42 +124,42 @@ func ExamplePool_concurrentGetAndPut() {
 
 	stats := pool.Stats()
 	fmt.Printf("CreatedTotal: %d\n", stats.CreatedTotal)
-	fmt.Printf("WaitedTotal: %d\n", stats.WaitedTotal)
 	fmt.Printf("DestroyedTotal: %d\n", stats.DestroyedTotal)
 	fmt.Printf("CountNow: %d\n", stats.CountNow)
 	fmt.Printf("BusyNow: %d\n", stats.BusyNow)
 	fmt.Printf("IdleNow: %d\n", stats.IdleNow)
 	fmt.Printf("WaitingNow: %d\n", stats.WaitingNow)
+	fmt.Printf("WaitingMax: %d\n", stats.WaitingMax)
 	fmt.Print("===\n")
 
 	time.Sleep(1 * time.Second)
 
 	stats = pool.Stats()
 	fmt.Printf("CreatedTotal: %d\n", stats.CreatedTotal)
-	fmt.Printf("WaitedTotal: %d\n", stats.WaitedTotal)
 	fmt.Printf("DestroyedTotal: %d\n", stats.DestroyedTotal)
 	fmt.Printf("CountNow: %d\n", stats.CountNow)
 	fmt.Printf("BusyNow: %d\n", stats.BusyNow)
 	fmt.Printf("IdleNow: %d\n", stats.IdleNow)
 	fmt.Printf("WaitingNow: %d\n", stats.WaitingNow)
+	fmt.Printf("WaitingMax: %d\n", stats.WaitingMax)
 	fmt.Print("===\n")
 
 	// Output:
 	// CreatedTotal: 10
-	// WaitedTotal: 90
 	// DestroyedTotal: 0
 	// CountNow: 10
 	// BusyNow: 0
 	// IdleNow: 10
 	// WaitingNow: 0
+	// WaitingMax: 90
 	// ===
 	// CreatedTotal: 10
-	// WaitedTotal: 90
 	// DestroyedTotal: 8
 	// CountNow: 2
 	// BusyNow: 0
 	// IdleNow: 2
 	// WaitingNow: 0
+	// WaitingMax: 90
 	// ===
 }
 
@@ -425,11 +497,6 @@ func TestPoolConcurrentGetAndPut(t *testing.T) {
 	if ugot != uwant {
 		t.Errorf("Expected CreatedTotal to be %d, got: %d", uwant, ugot)
 	}
-	uwant = 90
-	ugot = stats.WaitedTotal
-	if ugot != uwant {
-		t.Errorf("Expected WaitedTotal to be %d, got: %d", uwant, ugot)
-	}
 	uwant = 0
 	ugot = stats.DestroyedTotal
 	if ugot != uwant {
@@ -455,6 +522,11 @@ func TestPoolConcurrentGetAndPut(t *testing.T) {
 	if got != want {
 		t.Errorf("Expected WaitingNow to be %d, got: %d", want, got)
 	}
+	want = 90
+	got = stats.WaitingMax
+	if got != want {
+		t.Errorf("Expected WaitingMax to be %d, got: %d", want, got)
+	}
 
 	time.Sleep(1 * time.Second)
 
@@ -463,11 +535,6 @@ func TestPoolConcurrentGetAndPut(t *testing.T) {
 	ugot = stats.CreatedTotal
 	if ugot != uwant {
 		t.Errorf("Expected CreatedTotal to be %d, got: %d", uwant, ugot)
-	}
-	uwant = 90
-	ugot = stats.WaitedTotal
-	if ugot != uwant {
-		t.Errorf("Expected WaitedTotal to be %d, got: %d", uwant, ugot)
 	}
 	uwant = 8
 	ugot = stats.DestroyedTotal
@@ -493,6 +560,11 @@ func TestPoolConcurrentGetAndPut(t *testing.T) {
 	got = stats.WaitingNow
 	if got != want {
 		t.Errorf("Expected WaitingNow to be %d, got: %d", want, got)
+	}
+	want = 90
+	got = stats.WaitingMax
+	if got != want {
+		t.Errorf("Expected WaitingMax to be %d, got: %d", want, got)
 	}
 }
 
@@ -1035,11 +1107,6 @@ func TestPoolStressTest(t *testing.T) {
 	ugot := stats.CreatedTotal
 	if ugot != uwant {
 		t.Errorf("Expected CreatedTotal to be %d, got: %d", uwant, ugot)
-	}
-	uwant = uint(980)
-	ugot = stats.WaitedTotal
-	if ugot != uwant {
-		t.Errorf("Expected WaitedTotal to be %d, got: %d", uwant, ugot)
 	}
 	uwant = uint(0)
 	ugot = stats.DestroyedTotal
