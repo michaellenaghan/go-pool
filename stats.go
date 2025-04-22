@@ -4,9 +4,6 @@ package pool
 type Stats struct {
 	// Number of created objects
 	CreatedTotal uint
-	// Number of objects waited for
-	// (i.e. number of "Get"ers that had to wait for a "Put"er)
-	WaitedTotal uint
 	// Number of destroyed objects
 	DestroyedTotal uint
 
@@ -16,7 +13,11 @@ type Stats struct {
 	BusyNow int
 	// Number of idle objects right now (idle == count - busy)
 	IdleNow int
+
 	// Number of objects being waited for right now
-	// (i.e. number of "Get"ers currently waiting for a "Put"er)
+	// (i.e. current number of "Get"ers waiting for a "Put"er)
 	WaitingNow int
+	// Number of objects being waited for maximum
+	// (i.e. maximum number of "Get"ers waiting for a "Put"er)
+	WaitingMax int
 }
