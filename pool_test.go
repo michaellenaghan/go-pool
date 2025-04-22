@@ -48,8 +48,12 @@ func BenchmarkGetPut(b *testing.B) {
 			}
 			defer pool.Stop()
 
+			// Cancellable contexts can impact performance, so use one.
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
 			for b.Loop() {
-				obj, err := pool.Get(b.Context())
+				obj, err := pool.Get(ctx)
 				if err != nil {
 					b.Errorf("Failed to get object: %v\n", err)
 					continue
@@ -72,9 +76,13 @@ func BenchmarkGetPut(b *testing.B) {
 			}
 			defer pool.Stop()
 
+			// Cancellable contexts can impact performance, so use one.
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					obj, err := pool.Get(b.Context())
+					obj, err := pool.Get(ctx)
 					if err != nil {
 						b.Errorf("Failed to get object: %v\n", err)
 						continue
